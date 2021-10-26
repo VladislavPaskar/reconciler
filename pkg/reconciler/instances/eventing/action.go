@@ -37,7 +37,7 @@ const (
 	progressTrackerInterval = 5 * time.Second
 	progressTrackerTimeout  = 2 * time.Minute
 
-	natsOperatorName  = "nats-operator"
+	natsOperatorName        = "nats-operator"
 	natsOperatorLastVersion = "1.24.7"
 )
 
@@ -110,6 +110,9 @@ func (a *preAction) Run(context *service.ActionContext) (err error) {
 		// get charts from the version when the old NATS-operator yaml resource definitions still exist
 		comp := chart.NewComponentBuilder(natsOperatorLastVersion, ReconcilerName).WithNamespace(namespace).Build()
 		manifest, err := context.ChartProvider.RenderManifest(comp)
+		if err != nil {
+			return nil
+		}
 		_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
 		if err != nil {
 			return err
