@@ -4,6 +4,7 @@ import (
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/chart"
 	"strings"
 	"time"
+	"fmt"
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -51,6 +52,7 @@ type preAction struct {
 
 // Run Eventing reconciler action logic. It returns a non-nil error if the action was unsuccessful.
 func (a *preAction) Run(context *service.ActionContext) (err error) {
+
 	// prepare Kubernetes clientset
 	var clientset kubernetes.Interface
 	if clientset, err = context.KubeClient.Clientset(); err != nil {
@@ -65,6 +67,44 @@ func (a *preAction) Run(context *service.ActionContext) (err error) {
 
 	// prepare logger
 	log := a.contextLogger(context)
+
+	// remove the old NATS-operator resources if the NATS-operator deployment still exists
+	natsOperatorDeployment, err := getDeployment(context, clientset, natsOperatorName)
+	if err != nil {
+		return err
+	}
+
+	// TODO test reconciler without eventing installed, it should not fail -> move on to the installation
+	// TODO2 split the logic into structs
+	log.With(logKeyReason, context.Model.Version).Info("Version output")
+	if natsOperatorDeployment != nil {
+		// get charts from the version when the old NATS-operator yaml resource definitions still exist
+		comp := chart.NewComponentBuilder(natsOperatorLastVersion, ReconcilerName+"/charts/nats").
+			WithConfiguration(map[string]interface{}{
+				"global.image.repository":  "eu.gcr.io/kyma-project",
+				//".Values.global.securityContext":   "test",
+				//".Values.global.priorityClassName": "test",
+			}).
+			//WithURL(ReconcilerName + "/nats"). // specify the subchart
+			WithNamespace(namespace).
+			Build()
+		manifest, err := context.ChartProvider.RenderManifest(comp)
+		log.Infof("component: %+v", comp)
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+
+		log.Infof("manifest: %+v", manifest)
+		_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+	}
+	if true {
+		return fmt.Errorf("stop here")
+	}
 
 	// skip action if the Eventing controller deployment is already managed by the Kyma reconciler
 	// this means that Kyma Eventing is already upgraded to version 2.X
@@ -99,24 +139,6 @@ func (a *preAction) Run(context *service.ActionContext) (err error) {
 	// check the current state of the Eventing controller deployment
 	if controllerDeployment != nil && !containerHasDesiredEnvValue(controllerDeployment, controllerDeploymentContainerName, controllerDeploymentEnvName, configMapName, configMapKey) {
 		return deleteDeploymentsAndWait(context, clientset, log, tracker, publisherDeployment, controllerDeployment)
-	}
-
-	// remove the old NATS-operator resources if the NATS-operator deployment still exists
-	natsOperatorDeployment, err := getDeployment(context, clientset, natsOperatorName)
-	if err != nil {
-		return err
-	}
-	if natsOperatorDeployment != nil {
-		// get charts from the version when the old NATS-operator yaml resource definitions still exist
-		comp := chart.NewComponentBuilder(natsOperatorLastVersion, ReconcilerName).WithNamespace(namespace).Build()
-		manifest, err := context.ChartProvider.RenderManifest(comp)
-		if err != nil {
-			return nil
-		}
-		_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
-		if err != nil {
-			return err
-		}
 	}
 
 	// current state of the Eventing controller and publisher deployments is matching the desired state

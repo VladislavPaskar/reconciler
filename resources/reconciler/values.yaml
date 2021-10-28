@@ -12,9 +12,9 @@ global:
       #TODO remove below after migration to separate user will be done
       reconcilerDBName: "reconciler"
   image:
-    repository: eu.gcr.io/kyma-project/incubator/reconciler
-    pullPolicy: IfNotPresent
-    tag: PR-312
+    repository: vpaskarsap/reconciler
+    pullPolicy: Always
+    tag: latest
   components: []
 
 # TODO https://github.com/kyma-incubator/reconciler/issues/53
