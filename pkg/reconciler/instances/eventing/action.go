@@ -1,10 +1,11 @@
 package eventing
 
 import (
+	"fmt"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/chart"
+	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes/kubeclient"
 	"strings"
 	"time"
-	"fmt"
 
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +41,12 @@ const (
 
 	natsOperatorName        = "nats-operator"
 	natsOperatorLastVersion = "1.24.7"
+	natsSubChartPath        = "eventing/charts/nats"
+	eventingNats            = "eventing-nats"
+)
+
+var (
+	natsOperatorCRDsToDelete = []string{"natsclusters.nats.io", "natsserviceroles.nats.io"}
 )
 
 // preAction represents an action that should run before reconciling the Eventing component.
@@ -74,33 +81,10 @@ func (a *preAction) Run(context *service.ActionContext) (err error) {
 		return err
 	}
 
-	// TODO test reconciler without eventing installed, it should not fail -> move on to the installation
-	// TODO2 split the logic into structs
-	log.With(logKeyReason, context.Model.Version).Info("Version output")
-	if natsOperatorDeployment != nil {
-		// get charts from the version when the old NATS-operator yaml resource definitions still exist
-		comp := chart.NewComponentBuilder(natsOperatorLastVersion, ReconcilerName+"/charts/nats").
-			WithConfiguration(map[string]interface{}{
-				"global.image.repository":  "eu.gcr.io/kyma-project",
-				//".Values.global.securityContext":   "test",
-				//".Values.global.priorityClassName": "test",
-			}).
-			//WithURL(ReconcilerName + "/nats"). // specify the subchart
-			WithNamespace(namespace).
-			Build()
-		manifest, err := context.ChartProvider.RenderManifest(comp)
-		log.Infof("component: %+v", comp)
-		if err != nil {
-			log.Error(err)
-			return err
-		}
-
-		log.Infof("manifest: %+v", manifest)
-		_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
-		if err != nil {
-			log.Error(err)
-			return err
-		}
+	// TODO split the logic into structs
+	err = removeOldNatsOperatorCRDs(context, log, natsOperatorDeployment)
+	if err != nil {
+		return err
 	}
 	if true {
 		return fmt.Errorf("stop here")
@@ -143,6 +127,53 @@ func (a *preAction) Run(context *service.ActionContext) (err error) {
 
 	// current state of the Eventing controller and publisher deployments is matching the desired state
 	log.With(logKeyReason, "desired state and actual state are matching").Info("Action skipped")
+	return nil
+}
+
+func removeOldNatsOperatorCRDs(context *service.ActionContext, log *zap.SugaredLogger, natsOperatorDeployment *v1.Deployment) error {
+	if natsOperatorDeployment == nil {
+		return nil
+	}
+	// get charts from the version when the old NATS-operator yaml resource definitions still exist
+	comp := chart.NewComponentBuilder(natsOperatorLastVersion, natsSubChartPath).
+		WithConfiguration(map[string]interface{}{
+			"global.image.repository": "eu.gcr.io/kyma-project", // replace the missing global value, as we are rendering on the subchart level
+		}).
+		WithNamespace(namespace).
+		Build()
+
+	manifest, err := context.ChartProvider.RenderManifest(comp)
+	if err != nil {
+		return err
+	}
+
+	// set the right eventing name, which went lost after rendering
+	manifest.Manifest = strings.ReplaceAll(manifest.Manifest, natsSubChartPath, eventingNats)
+
+	// remove all the nats-operator resources, installed via charts
+	_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
+	if err != nil {
+		return err
+	}
+
+	err = removeOldNatsOperatorResources(context, log)
+	return err
+}
+
+// delete the leftover crds, which were outside of charts
+func removeOldNatsOperatorResources(context *service.ActionContext, log *zap.SugaredLogger) error {
+	kubeClient, err := kubeclient.NewKubeClient(context.Model.Kubeconfig, log)
+	if err != nil {
+		return err
+	}
+
+	for _, crdName := range natsOperatorCRDsToDelete {
+		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace, metav1.DeleteOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			log.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
+			return err
+		}
+	}
 	return nil
 }
 
