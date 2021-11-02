@@ -2,14 +2,15 @@ package worker
 
 import (
 	"context"
+	"strings"
+	"time"
+
 	"github.com/kyma-incubator/reconciler/pkg/model"
 	"github.com/kyma-incubator/reconciler/pkg/scheduler/invoker"
 	"github.com/kyma-incubator/reconciler/pkg/scheduler/reconciliation"
 	"github.com/panjf2000/ants/v2"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"strings"
-	"time"
 )
 
 type Pool struct {
@@ -148,9 +149,10 @@ func (w *Pool) invokeProcessableOps(workerPool *ants.PoolWithFunc) (int, error) 
 
 	for idx, op := range ops {
 		if err := workerPool.Invoke(op); err == nil {
-			w.logger.Infof("Worker pool assigned worker to operation '%s'", op)
+			w.logger.Infof("Worker pool assigned worker to reconcile component '%s' on cluster '%s' (%s)",
+				op.Component, op.RuntimeID, op)
 		} else {
-			w.logger.Warnf("Worker pool failed to assign processable operation '%s' to a worker: %s", op, err)
+			w.logger.Warnf("Worker pool failed to assign worker to operation '%s': %s", op, err)
 			return idx + 1, err
 		}
 	}

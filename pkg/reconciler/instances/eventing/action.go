@@ -182,7 +182,7 @@ func (a *preAction) contextLogger(context *service.ActionContext) *zap.SugaredLo
 	return context.Logger.With(
 		logKeyAction, a.name,
 		logKeyReconciler, ReconcilerName,
-		logKeyVersion, context.Model.Version,
+		logKeyVersion, context.Task.Version,
 	)
 }
 
