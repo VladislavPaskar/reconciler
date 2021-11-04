@@ -75,29 +75,27 @@ func removeNatsOperatorResources(context *service.ActionContext, logger *zap.Sug
 	// set the right eventing name, which went lost after rendering
 	manifest.Manifest = strings.ReplaceAll(manifest.Manifest, natsSubChartPath, eventingNats)
 
-
-	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
-	if err != nil {
-		return err
-	}
-
-
 	// remove all the nats-operator resources, installed via charts
 	_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
 	if err != nil {
 		return err
 	}
 
-	err = removeNatsOperatorCRDs(kubeClient, logger)
+	err = removeNatsOperatorCRDs(context, logger)
 	return err
 }
 
 // delete the leftover CRDs, which were outside of charts
-func removeNatsOperatorCRDs(kubeClient *kubeclient.KubeClient, log *zap.SugaredLogger) error {
+func removeNatsOperatorCRDs(context *service.ActionContext, logger *zap.SugaredLogger) error {
+
+	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
+	if err != nil {
+		return err
+	}
 	for _, crdName := range natsOperatorCRDsToDelete {
 		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {
-			log.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
+			logger.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
 			return err
 		}
 	}
