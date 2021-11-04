@@ -49,10 +49,10 @@ docker-build:
 .PHONY: docker-push
 docker-push:
 ifdef IMG_REPO
-	docker tag $(APP_NAME)/mothership $(IMG_NAME)mothership:$(TAG)
-	docker tag $(APP_NAME)/component $(IMG_NAME)component:$(TAG)
-	docker push $(IMG_NAME)mothership:$(TAG)
-	docker push $(IMG_NAME)component:$(TAG)
+	docker tag $(APP_NAME)/mothership $(IMG_NAME)/mothership:$(TAG)
+	docker tag $(APP_NAME)/component $(IMG_NAME)/component:$(TAG)
+	docker push $(IMG_NAME)/mothership:$(TAG)
+	docker push $(IMG_NAME)/component:$(TAG)
 endif
 
 .PHONY: bump-primage
@@ -63,7 +63,6 @@ bump-primage:
 deploy:
 	@./scripts/kcversion.sh
 	kubectl create namespace reconciler --dry-run=client -o yaml | kubectl apply -f -
-	kubectl label namespace reconciler istio-injection=disabled --overwrite
 	helm template reconciler --namespace reconciler --set "global.components={$(COMPONENTS)}" ./resources/reconciler > reconciler.yaml
 	kubectl apply -f reconciler.yaml
 	rm reconciler.yaml
