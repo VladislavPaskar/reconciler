@@ -20,22 +20,42 @@ const (
 	natsOperatorLastVersion    = "1.24.7"
 	natsSubChartPath           = "eventing/charts/nats"
 	eventingNats               = "eventing-nats"
-	CRDKind                    = "customresourcedefinitions"
 )
 
 var (
 	natsOperatorCRDsToDelete = []string{"natsclusters.nats.io", "natsserviceroles.nats.io"}
 )
 
-type removeNatsOperatorStep struct{}
+type kubeClientProvider func(context *service.ActionContext, logger *zap.SugaredLogger) (kubeclient.Client, error)
 
-func (r removeNatsOperatorStep) Execute(context *service.ActionContext, logger *zap.SugaredLogger) error {
+type removeNatsOperatorStep struct {
+	kubeClientProvider
+}
+
+func newRemoveNatsOperatorStep() *removeNatsOperatorStep {
+	return &removeNatsOperatorStep{
+		kubeClientProvider: defaultKubeClientProvider,
+	}
+}
+
+func defaultKubeClientProvider(context *service.ActionContext, logger *zap.SugaredLogger) (kubeclient.Client, error) {
+	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
+	if err != nil {
+		return nil, err
+	}
+	return kubeClient, nil
+}
+
+func (r *removeNatsOperatorStep) Execute(context *service.ActionContext, logger *zap.SugaredLogger) error {
+	kubeClient, err := r.kubeClientProvider(context, logger)
+	if err != nil {
+		return err
+	}
 
 	// decorate logger
 	logger = logger.With(log.KeyStep, removeNatsOperatorStepName)
 	// prepare Kubernetes clientset
 	var clientset kubernetes.Interface
-	var err error
 	if clientset, err = context.KubeClient.Clientset(); err != nil {
 		return err
 	}
@@ -46,7 +66,7 @@ func (r removeNatsOperatorStep) Execute(context *service.ActionContext, logger *
 		return err
 	}
 
-	err = removeNatsOperatorResources(context, logger, natsOperatorDeployment, clientset)
+	err = r.removeNatsOperatorResources(context, kubeClient, logger, natsOperatorDeployment)
 	if err != nil {
 		return err
 	}
@@ -54,7 +74,7 @@ func (r removeNatsOperatorStep) Execute(context *service.ActionContext, logger *
 	return nil
 }
 
-func removeNatsOperatorResources(context *service.ActionContext, logger *zap.SugaredLogger, natsOperatorDeployment *appsv1.Deployment, clientset kubernetes.Interface) error {
+func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient kubeclient.Client, logger *zap.SugaredLogger, natsOperatorDeployment *appsv1.Deployment) error {
 	if natsOperatorDeployment == nil {
 		logger.With(log.KeyReason, "no nats-operator deployment found").Info("Step skipped")
 		return nil
@@ -81,21 +101,16 @@ func removeNatsOperatorResources(context *service.ActionContext, logger *zap.Sug
 		return err
 	}
 
-	err = removeNatsOperatorCRDs(context, logger)
+	err = r.removeNatsOperatorCRDs(kubeClient, logger)
 	return err
 }
 
 // delete the leftover CRDs, which were outside of charts
-func removeNatsOperatorCRDs(context *service.ActionContext, logger *zap.SugaredLogger) error {
-
-	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
-	if err != nil {
-		return err
-	}
+func (r *removeNatsOperatorStep) removeNatsOperatorCRDs(kubeClient kubeclient.Client, log *zap.SugaredLogger) error {
 	for _, crdName := range natsOperatorCRDsToDelete {
 		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {
-			logger.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
+			log.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
 			return err
 		}
 	}
