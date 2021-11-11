@@ -6,27 +6,26 @@ import (
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes/kubeclient"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/service"
 	"go.uber.org/zap"
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"strings"
 )
 
 const (
 	removeNatsOperatorStepName = "removeNatsOperator"
-
 	natsOperatorDeploymentName = "nats-operator"
 	natsOperatorLastVersion    = "1.24.7"
 	natsSubChartPath           = "eventing/charts/nats"
 	eventingNats               = "eventing-nats"
+	oldConfigValue             = "global.image.repository"
+	newConfigValue             = "eu.gcr.io/kyma-project"
 )
 
 var (
 	natsOperatorCRDsToDelete = []string{"natsclusters.nats.io", "natsserviceroles.nats.io"}
 )
 
-type kubeClientProvider func(context *service.ActionContext, logger *zap.SugaredLogger) (kubeclient.Client, error)
+type kubeClientProvider func(context *service.ActionContext, logger *zap.SugaredLogger) (*kubeclient.KubeClient, error)
 
 type removeNatsOperatorStep struct {
 	kubeClientProvider
@@ -38,7 +37,7 @@ func newRemoveNatsOperatorStep() *removeNatsOperatorStep {
 	}
 }
 
-func defaultKubeClientProvider(context *service.ActionContext, logger *zap.SugaredLogger) (kubeclient.Client, error) {
+func defaultKubeClientProvider(context *service.ActionContext, logger *zap.SugaredLogger) (*kubeclient.KubeClient, error) {
 	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
 	if err != nil {
 		return nil, err
@@ -54,35 +53,21 @@ func (r *removeNatsOperatorStep) Execute(context *service.ActionContext, logger 
 
 	// decorate logger
 	logger = logger.With(log.KeyStep, removeNatsOperatorStepName)
-	// prepare Kubernetes clientset
-	var clientset kubernetes.Interface
-	if clientset, err = context.KubeClient.Clientset(); err != nil {
-		return err
-	}
 
-	// remove the old NATS-operator resources if the NATS-operator deployment still exists
-	natsOperatorDeployment, err := getDeployment(context, clientset, natsOperatorDeploymentName)
+	err = r.removeNatsOperatorResources(context, kubeClient, logger)
 	if err != nil {
 		return err
 	}
 
-	err = r.removeNatsOperatorResources(context, kubeClient, logger, natsOperatorDeployment)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	err = r.removeNatsOperatorCRDs(kubeClient, logger)
+	return err
 }
 
-func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient kubeclient.Client, logger *zap.SugaredLogger, natsOperatorDeployment *appsv1.Deployment) error {
-	if natsOperatorDeployment == nil {
-		logger.With(log.KeyReason, "no nats-operator deployment found").Info("Step skipped")
-		return nil
-	}
-	// get charts from the version when the old NATS-operator yaml resource definitions still exist
+func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient *kubeclient.KubeClient, logger *zap.SugaredLogger) error {
+	// get charts from the version 1.2.x, where the NATS-operator resources still exist
 	comp := chart.NewComponentBuilder(natsOperatorLastVersion, natsSubChartPath).
-		WithConfiguration(map[string]interface{}{
-			"global.image.repository": "eu.gcr.io/kyma-project", // replace the missing global value, as we are rendering on the subchart level
+		WithConfiguration(map[string]interface{}{ //todo add more logging
+			oldConfigValue: newConfigValue, // replace the missing global value, as we are rendering on the subchart level
 		}).
 		WithNamespace(namespace).
 		Build()
@@ -95,18 +80,13 @@ func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.Ac
 	// set the right eventing name, which went lost after rendering
 	manifest.Manifest = strings.ReplaceAll(manifest.Manifest, natsSubChartPath, eventingNats)
 
-	// remove all the nats-operator resources, installed via charts
+	// remove all the existing nats-operator resources, installed via charts
 	_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
-	if err != nil {
-		return err
-	}
-
-	err = r.removeNatsOperatorCRDs(kubeClient, logger)
 	return err
 }
 
 // delete the leftover CRDs, which were outside of charts
-func (r *removeNatsOperatorStep) removeNatsOperatorCRDs(kubeClient kubeclient.Client, log *zap.SugaredLogger) error {
+func (r *removeNatsOperatorStep) removeNatsOperatorCRDs(kubeClient *kubeclient.KubeClient, log *zap.SugaredLogger) error {
 	for _, crdName := range natsOperatorCRDsToDelete {
 		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace, metav1.DeleteOptions{})
 		if err != nil && !errors.IsNotFound(err) {

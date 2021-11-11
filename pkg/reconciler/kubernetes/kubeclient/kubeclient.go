@@ -4,6 +4,7 @@ package kubeclient
 
 import (
 	"context"
+	fake "k8s.io/client-go/dynamic/fake"
 	"strings"
 
 	"go.uber.org/zap"
@@ -36,19 +37,6 @@ type Metadata struct {
 	Version   string
 	Resource  string
 	Kind      string
-}
-
-//go:generate mockery --name Client
-type Client interface {
-	Apply(u *unstructured.Unstructured) (*k8s.Resource, error)
-	ApplyWithNamespaceOverride(u *unstructured.Unstructured, namespaceOverride string) (*k8s.Resource, error)
-	GetClientSet() (*kubernetes.Clientset, error)
-	DeleteResourceByKindAndNameAndNamespace(kind, name, namespace string, do metav1.DeleteOptions) (*k8s.Resource, error)
-	Get(kind, name, namespace string) (*unstructured.Unstructured, error)
-	ListResource(resource string, lo metav1.ListOptions) (*unstructured.UnstructuredList, error)
-	Patch(kind, name, namespace string, p []byte) (Metadata, *unstructured.Unstructured, error)
-	PatchUsingStrategy(kind, name, namespace string, p []byte, strategy types.PatchType) (Metadata, *unstructured.Unstructured, error)
-	DeleteNamespace(namespace string) error
 }
 
 type KubeClient struct {
@@ -108,6 +96,14 @@ func newForConfig(config *rest.Config) (*KubeClient, error) {
 		config:        config,
 		mapper:        mapper,
 	}, nil
+}
+
+func NewFakeClient(fakeClient *fake.FakeDynamicClient, mapper *restmapper.DeferredDiscoveryRESTMapper) *KubeClient {
+	return &KubeClient{
+		dynamicClient: fakeClient,
+		config:        nil,
+		mapper:        mapper,
+	}
 }
 
 func (kube *KubeClient) Apply(u *unstructured.Unstructured) (*k8s.Resource, error) {
