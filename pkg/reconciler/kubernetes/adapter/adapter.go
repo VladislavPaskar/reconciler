@@ -49,6 +49,15 @@ func NewKubernetesClient(kubeconfig string, logger *zap.SugaredLogger, config *C
 	}, nil
 }
 
+func NewFakeKubernetesClient(kubeClient kubeclient.KubeClient, logger *zap.SugaredLogger, config *Config ) k8s.Client{
+	return &kubeClientAdapter{
+		kubeconfig: "",
+		kubeClient: kubeClient,
+		logger:     logger,
+		config:     config,
+	}
+}
+
 func (g *kubeClientAdapter) Kubeconfig() string {
 	return g.kubeconfig
 }

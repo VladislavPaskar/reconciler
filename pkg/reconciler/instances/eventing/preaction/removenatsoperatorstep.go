@@ -1,6 +1,8 @@
 package preaction
 
 import (
+	"strings"
+
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/chart"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/instances/eventing/log"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes/kubeclient"
@@ -8,7 +10,6 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"strings"
 )
 
 const (
@@ -64,7 +65,7 @@ func (r *removeNatsOperatorStep) Execute(context *service.ActionContext, logger 
 }
 
 func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient *kubeclient.KubeClient, logger *zap.SugaredLogger) error {
-	// get charts from the version 1.2.x, where the NATS-operator resources still exist
+	// get charts from the version 1.24.x, where the NATS-operator resources still exist
 	comp := chart.NewComponentBuilder(natsOperatorLastVersion, natsSubChartPath).
 		WithConfiguration(map[string]interface{}{ //todo add more logging
 			oldConfigValue: newConfigValue, // replace the missing global value, as we are rendering on the subchart level

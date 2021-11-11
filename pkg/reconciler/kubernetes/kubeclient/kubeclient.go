@@ -4,8 +4,9 @@ package kubeclient
 
 import (
 	"context"
-	fake "k8s.io/client-go/dynamic/fake"
 	"strings"
+
+	fake "k8s.io/client-go/dynamic/fake"
 
 	"go.uber.org/zap"
 
@@ -101,7 +102,7 @@ func newForConfig(config *rest.Config) (*KubeClient, error) {
 func NewFakeClient(fakeClient *fake.FakeDynamicClient, mapper *restmapper.DeferredDiscoveryRESTMapper) *KubeClient {
 	return &KubeClient{
 		dynamicClient: fakeClient,
-		config:        nil,
+		config:        &rest.Config{},
 		mapper:        mapper,
 	}
 }
