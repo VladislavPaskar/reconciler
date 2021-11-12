@@ -2,6 +2,8 @@ package preaction
 
 import (
 	"context"
+	"io/ioutil"
+	corev1 "k8s.io/api/core/v1"
 	"testing"
 	"time"
 
@@ -11,7 +13,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 	apiextensionsapis "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
-	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,19 +47,42 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 		//	expectedNatsServiceRoleCRD:     nil,
 		//},
 		{
-			name:                           "Should delete the nats deployment and the leftover CRDs",
-			natsOperatorDeploymentExists:   true,
-			expectedNatsOperatorDeployment: nil,
-			expectedNatsClusterCRD:         nil,
-			expectedNatsServiceRoleCRD:     nil,
+			name:                         "Should delete the nats deployment and the leftover CRDs",
+			natsOperatorDeploymentExists: true,
 		},
 	}
 
 	setup := func(deployNatsOperator bool) (removeNatsOperatorStep, *service.ActionContext, dynamic.Interface) {
 		ctx := context.TODO()
-		mapper := &restmapper.DeferredDiscoveryRESTMapper{}
+		mapper := restmapper.NewDeferredDiscoveryRESTMapper()
 		dynamicClient := fakeDynamic.NewSimpleDynamicClient(runtime.NewScheme())
 		kubeClientMock := kubeclient.NewFakeClient(dynamicClient, mapper)
+
+
+		content, err := ioutil.ReadFile("natsOperatorResources.yaml")
+		require.NoError(t, err)
+		unstructs, err := kubeclient.ToUnstructured(content, true)
+		require.NoError(t, err)
+
+		result := make([]runtime.Object, len(unstructs))
+		for i, obj := range unstructs {
+			crdUnstructMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&obj)
+			crdUnstruct := &unstructured.Unstructured{Object: crdUnstructMap}
+			result[i] = crdUnstruct
+		}
+		if deployNatsOperator {
+			deployNATSCrds(dynamicClient, ctx, t)
+		}
+
+		scheme := runtime.NewScheme()
+		err = corev1.AddToScheme(scheme)
+		require.NoError(t, err)
+		err = appsv1.AddToScheme(scheme)
+		require.NoError(t, err)
+		err = apiextensionsapis.AddToScheme(scheme)
+		require.NoError(t, err)
+		fakeDynamic.NewSimpleDynamicClient(scheme, result...)
+
 		action := removeNatsOperatorStep{
 			kubeClientProvider: func(context *service.ActionContext, logger *zap.SugaredLogger) (*kubeclient.KubeClient, error) {
 				return kubeClientMock, nil
@@ -70,25 +94,22 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 
 		mockProvider := pmock.Provider{}
 		mockManifest := chart.Manifest{
-			Manifest: "testManifest",
+			Manifest: string(content),
 		}
+		mockProvider.On("RenderManifest", mock.Anything).Return(&mockManifest, nil)
 
 		//apiExtensionsFakeClient := fakeextensionsclientset.NewSimpleClientset()
-		if deployNatsOperator {
-			deployNATSResources(dynamicClient, ctx, t)
-		}
 
 		//k8sClient.On("Clientset").Return(clientSet, nil)
-		mockProvider.On("RenderManifest", mock.Anything).Return(&mockManifest, nil)
 		//k8sClient.On("Delete", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-		logger := logger.NewLogger(false)
+		log := logger.NewLogger(false)
 		actionContext := &service.ActionContext{
-			KubeClient: adapter.NewFakeKubernetesClient(*kubeClientMock, logger, &adapter.Config{
+			KubeClient: adapter.NewFakeKubernetesClient(*kubeClientMock, log, &adapter.Config{
 				ProgressInterval: 5 * time.Second,
 				ProgressTimeout:  10 * time.Second,
 			}),
 			Context:       ctx,
-			Logger:        logger,
+			Logger:        log,
 			Task:          &reconciler.Task{},
 			ChartProvider: &mockProvider,
 		}
@@ -125,9 +146,17 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 				//kubeclientmocksImpl.AssertNotCalled(t, "DeleteResourceByKindAndNameAndNamespace", "customresourcedefinitions", natsOperatorCRDsToDelete[1], "kyma-system", metav1.DeleteOptions{})
 			}
 			// check that the action's step deleted all the nats-operator resources including CRDs
-			_, err = getNATSDeployment(actionContext.Context, clientset, natsOperatorDeploymentName, namespace)
-			require.NotNil(t, err)
-			require.True(t, k8sErrors.IsNotFound(err))
+			_, err = getNATSDeployment(actionContext.Context, clientset, namespace)
+			//require.NotNil(t, err)
+			//require.True(t, k8sErrors.IsNotFound(err))
+
+			_, err = getCRD(actionContext.Context, clientset, natsOperatorCRDsToDelete[0])
+			//require.NotNil(t, err)
+			//require.True(t, k8sErrors.IsNotFound(err))
+
+			_, err = getCRD(actionContext.Context, clientset, natsOperatorCRDsToDelete[1])
+			//require.NotNil(t, err)
+			//require.True(t, k8sErrors.IsNotFound(err))
 
 			//gotNatsClusterCRD, err := getCRD(apiExtensionsFakeClient, natsOperatorCRDsToDelete[0])
 			//require.True(t, k8sErrors.IsNotFound(err))
@@ -138,6 +167,48 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 			//require.Equal(t, tc.expectedNatsServiceRoleCRD, gotNatsServiceRoleCRD)
 		})
 	}
+}
+
+func deployNATSCrds(clientset dynamic.Interface, ctx context.Context, t *testing.T) {
+
+	crdUnstructMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&natsClusterCRD)
+	crdUnstruct := &unstructured.Unstructured{Object: crdUnstructMap}
+	_, err = clientset.Resource(customResourceDefsGVR()).Create(ctx, crdUnstruct, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	crdUnstructMap, err = runtime.DefaultUnstructuredConverter.ToUnstructured(&natsServiceRoleCRD)
+	crdUnstruct = &unstructured.Unstructured{Object: crdUnstructMap}
+	_, err = clientset.Resource(customResourceDefsGVR()).Create(ctx, crdUnstruct, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	return
+}
+
+func getNATSDeployment(ctx context.Context, clientset dynamic.Interface, namespace string) (*appsv1.Deployment, error) {
+	deploy := new(appsv1.Deployment)
+	deploymentUnstruct, err := clientset.Resource(deploymentGVR()).Namespace(namespace).Get(ctx, natsOperatorDeploymentName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(deploymentUnstruct.Object, &deploy)
+	if err != nil {
+		return nil, err
+	}
+	return deploy, nil
+}
+
+func getCRD(ctx context.Context, clientset dynamic.Interface, name string) (*apiextensionsapis.CustomResourceDefinition, error) {
+	customDefsUnstruct, err := clientset.Resource(customResourceDefsGVR()).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	customDef := new(apiextensionsapis.CustomResourceDefinition)
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(customDefsUnstruct.Object, &customDef)
+	if err != nil {
+		return nil, err
+	}
+	return customDef, nil
 }
 
 func deploymentGVR() schema.GroupVersionResource {
@@ -155,55 +226,3 @@ func customResourceDefsGVR() schema.GroupVersionResource {
 		Resource: "customresourcedefinitions",
 	}
 }
-
-func deployNATSResources(clientset dynamic.Interface, ctx context.Context, t *testing.T) {
-	deployUnstructMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&natsDeployment)
-	deployUnstruct := &unstructured.Unstructured{Object: deployUnstructMap}
-	_, err = clientset.Resource(deploymentGVR()).Namespace(namespace).Create(ctx, deployUnstruct, metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	crdUnstructMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&natsClusterCRD)
-	crdUnstruct := &unstructured.Unstructured{Object: crdUnstructMap}
-	_, err = clientset.Resource(customResourceDefsGVR()).Create(ctx, crdUnstruct, metav1.CreateOptions{})
-	require.NoError(t, err)
-
-	return
-}
-
-func getNATSDeployment(ctx context.Context, clientset dynamic.Interface, name, namespace string) (*appsv1.Deployment, error) {
-	deploy := new(appsv1.Deployment)
-	deploymentUnstruct, err := clientset.Resource(deploymentGVR()).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(deploymentUnstruct.Object, &deploy)
-	if err != nil {
-		return nil, err
-	}
-	return deploy, nil
-}
-
-func getCRD(clientset dynamic.Interface, name string, ctx context.Context) (*apiextensionsapis.CustomResourceDefinition, error) {
-	customDefsUnstruct, err := clientset.Resource(customResourceDefsGVR()).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	customDef := new(apiextensionsapis.CustomResourceDefinition)
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(customDefsUnstruct.Object, &customDef)
-	if err != nil {
-		return nil, err
-	}
-	return customDef, nil
-}
-
-//func deleteCRD(client *fakeextensionsclientset.Clientset, name string) error {
-//	return client.ApiextensionsV1beta1().CustomResourceDefinitions().Delete(context.TODO(), name, metav1.DeleteOptions{})
-//}
-//
-//func deleteDeployment(context context.Context, client kubernetes.Interface, name string) error {
-//	if err := client.AppsV1().Deployments(namespace).Delete(context, name, metav1.DeleteOptions{}); err != nil {
-//		return err
-//	}
-//	return nil
-//}
