@@ -11,9 +11,12 @@ var (
 	natsClusterCRD     = &apiextensionsapis.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: natsOperatorCRDsToDelete[0]}}
 	natsServiceRoleCRD = &apiextensionsapis.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: natsOperatorCRDsToDelete[1]}}
 	natsDeployment     = &v1.Deployment{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Deployment",
+			APIVersion: "apps/v1",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      natsOperatorDeploymentName,
 			Namespace: namespace,
 		}}
 )
-

@@ -13,6 +13,7 @@ require (
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/golang-migrate/migrate/v4 v4.14.1
 	github.com/google/uuid v1.2.0
+	github.com/googleapis/gnostic v0.4.1 // indirect
 	github.com/gorilla/mux v1.8.0
 	github.com/iancoleman/strcase v0.1.3
 	github.com/imdario/mergo v0.3.12
@@ -44,4 +45,8 @@ require (
 	k8s.io/kubectl v0.21.0
 	rsc.io/letsencrypt v0.0.3 // indirect
 	sigs.k8s.io/yaml v1.2.0
+)
+
+replace(
+	github.com/nats-io/nats-operator => github.com/nats-io/nats-operator v0.8.2
 )

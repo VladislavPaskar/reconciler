@@ -60,7 +60,7 @@ func (r *removeNatsOperatorStep) Execute(context *service.ActionContext, logger 
 		return err
 	}
 
-	err = r.removeNatsOperatorCRDs(kubeClient, logger)
+	//err = r.removeNatsOperatorCRDs(kubeClient, logger)
 	return err
 }
 
