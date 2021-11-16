@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/client-go/dynamic"
+
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -84,9 +86,13 @@ func (m *migrateEventTypePrefixConfigStep) Execute(context *service.ActionContex
 		logger.With(log.KeyReason, "Eventing is not installed").Info("Step skipped")
 		return nil
 	}
+	dynClient, err := context.KubeClient.GetDynClient()
+	if err != nil {
+		return err
+	}
 
 	// prepare progress tracker for the Eventing controller and publisher deployments
-	tracker, err := getDeploymentProgressTracker(clientset, logger, publisherDeployment, controllerDeployment)
+	tracker, err := getDeploymentProgressTracker(clientset, logger, dynClient, publisherDeployment, controllerDeployment)
 	if err != nil {
 		return err
 	}
@@ -119,8 +125,8 @@ func getDeployment(context *service.ActionContext, clientset kubernetes.Interfac
 }
 
 // getDeploymentProgressTracker returns a progress tracker for the given deployments.
-func getDeploymentProgressTracker(clientset kubernetes.Interface, log *zap.SugaredLogger, deployments ...*v1.Deployment) (*progress.Tracker, error) {
-	tracker, err := progress.NewProgressTracker(clientset, log, progress.Config{Interval: progressTrackerInterval, Timeout: progressTrackerTimeout})
+func getDeploymentProgressTracker(clientset kubernetes.Interface, log *zap.SugaredLogger, dynClient dynamic.Interface, deployments ...*v1.Deployment) (*progress.Tracker, error) {
+	tracker, err := progress.NewProgressTracker(clientset, log, progress.Config{Interval: progressTrackerInterval, Timeout: progressTrackerTimeout}, dynClient)
 	if err != nil {
 		return nil, err
 	}

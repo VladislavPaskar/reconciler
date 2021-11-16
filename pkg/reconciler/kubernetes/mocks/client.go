@@ -7,6 +7,8 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 
+	dynamic "k8s.io/client-go/dynamic"
+
 	kubernetes "k8s.io/client-go/kubernetes"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -96,6 +98,29 @@ func (_m *Client) Deploy(ctx context.Context, manifest string, namespace string,
 	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, string, string, ...reconcilerkubernetes.ResourceInterceptor) error); ok {
 		r1 = rf(ctx, manifest, namespace, interceptors...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetDynClient provides a mock function with given fields:
+func (_m *Client) GetDynClient() (dynamic.Interface, error) {
+	ret := _m.Called()
+
+	var r0 dynamic.Interface
+	if rf, ok := ret.Get(0).(func() dynamic.Interface); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dynamic.Interface)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
 	} else {
 		r1 = ret.Error(1)
 	}

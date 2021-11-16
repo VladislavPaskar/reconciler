@@ -3,9 +3,11 @@ package progress
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"time"
+	"k8s.io/client-go/dynamic"
 
 	e "github.com/kyma-incubator/reconciler/pkg/error"
 	"go.uber.org/zap"
@@ -58,23 +60,25 @@ func (ptc *Config) validate() error {
 }
 
 type Tracker struct {
-	objects  []*resource
-	client   kubernetes.Interface
-	interval time.Duration
-	timeout  time.Duration
-	logger   *zap.SugaredLogger
+	objects       []*resource
+	client        kubernetes.Interface
+	interval      time.Duration
+	timeout       time.Duration
+	logger        *zap.SugaredLogger
+	dynamicClient dynamic.Interface
 }
 
-func NewProgressTracker(client kubernetes.Interface, logger *zap.SugaredLogger, config Config) (*Tracker, error) {
+func NewProgressTracker(client kubernetes.Interface, logger *zap.SugaredLogger, config Config, dynamicClient dynamic.Interface) (*Tracker, error) {
 	if err := config.validate(); err != nil {
 		return nil, err
 	}
 
 	return &Tracker{
-		client:   client,
-		interval: config.Interval,
-		timeout:  config.Timeout,
-		logger:   logger,
+		client:        client,
+		interval:      config.Interval,
+		timeout:       config.Timeout,
+		logger:        logger,
+		dynamicClient: dynamicClient,
 	}, nil
 }
 
@@ -155,9 +159,9 @@ func (pt *Tracker) isInReadyState(ctx context.Context) (bool, error) {
 
 		switch object.kind {
 		case Pod:
-			ready, err = isPodReady(ctx, pt.client, object)
+			ready, err = isPodReady(ctx, pt.dynamicClient, object)
 		case Deployment:
-			ready, err = isDeploymentReady(ctx, pt.client, object)
+			ready, err = isDeploymentReady(ctx, pt.dynamicClient, object)
 		case DaemonSet:
 			ready, err = isDaemonSetReady(ctx, pt.client, object)
 		case StatefulSet:
@@ -189,7 +193,7 @@ func (pt *Tracker) isInTerminatedState(ctx context.Context) (bool, error) {
 		case Pod:
 			_, err = pt.client.CoreV1().Pods(object.namespace).Get(ctx, object.name, metav1.GetOptions{})
 		case Deployment:
-			_, err = pt.client.AppsV1().Deployments(object.namespace).Get(ctx, object.name, metav1.GetOptions{})
+			_, err = pt.dynamicClient.Resource(DeployGVK).Namespace(object.namespace).Get(ctx, object.name, metav1.GetOptions{})
 		case DaemonSet:
 			_, err = pt.client.AppsV1().DaemonSets(object.namespace).Get(ctx, object.name, metav1.GetOptions{})
 		case StatefulSet:

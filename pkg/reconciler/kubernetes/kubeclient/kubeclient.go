@@ -6,7 +6,7 @@ import (
 	"context"
 	"strings"
 
-	fake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/dynamic/fake"
 
 	"go.uber.org/zap"
 
@@ -78,6 +78,7 @@ func NewKubeClient(kubeconfig string, logger *zap.SugaredLogger) (*KubeClient, e
 	}
 
 	config.WarningHandler = &loggingWarningHandler{logger: logger}
+
 	return newForConfig(config)
 }
 
@@ -91,7 +92,6 @@ func newForConfig(config *rest.Config) (*KubeClient, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return &KubeClient{
 		dynamicClient: dynamicClient,
 		config:        config,
@@ -186,6 +186,10 @@ func (kube *KubeClient) ApplyWithNamespaceOverride(u *unstructured.Unstructured,
 
 func (kube *KubeClient) GetClientSet() (*kubernetes.Clientset, error) {
 	return kubernetes.NewForConfig(kube.config)
+}
+
+func (kube *KubeClient) GetDynClient() (dynamic.Interface, error) {
+	return kube.dynamicClient, nil
 }
 
 func (kube *KubeClient) DeleteResourceByKindAndNameAndNamespace(kind, name, namespace string, do metav1.DeleteOptions) (*k8s.Resource, error) {

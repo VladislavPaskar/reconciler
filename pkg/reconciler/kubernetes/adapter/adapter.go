@@ -3,9 +3,12 @@ package adapter
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"k8s.io/client-go/dynamic"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	"time"
 
 	k8s "github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes/kubeclient"
@@ -24,6 +27,10 @@ type kubeClientAdapter struct {
 	kubeClient kubeclient.KubeClient
 	logger     *zap.SugaredLogger
 	config     *Config
+}
+
+func (g *kubeClientAdapter) GetDynClient() (dynamic.Interface, error) {
+	return g.kubeClient.GetDynClient()
 }
 
 type Config struct {
@@ -49,7 +56,7 @@ func NewKubernetesClient(kubeconfig string, logger *zap.SugaredLogger, config *C
 	}, nil
 }
 
-func NewFakeKubernetesClient(kubeClient kubeclient.KubeClient, logger *zap.SugaredLogger, config *Config ) k8s.Client{
+func NewFakeKubernetesClient(kubeClient kubeclient.KubeClient, logger *zap.SugaredLogger, config *Config) k8s.Client {
 	return &kubeClientAdapter{
 		kubeconfig: "",
 		kubeClient: kubeClient,
@@ -217,11 +224,11 @@ func (g *kubeClientAdapter) Delete(ctx context.Context, manifest, namespace stri
 		g.logger.Warnf("Watching progress of deleted resources failed: %s", err)
 	}
 
-	if err = g.kubeClient.DeleteNamespace(namespace); err != nil && !k8serr.IsNotFound(err) {
-		g.logger.Errorf("Failed to delete namespace name='%s': %s",
-			namespace, err)
-		return deletedResources, err
-	}
+	//if err = g.kubeClient.DeleteNamespace(namespace); err != nil && !k8serr.IsNotFound(err) {
+	//	g.logger.Errorf("Failed to delete namespace name='%s': %s",
+	//		namespace, err)
+	//	return deletedResources, err
+	//}
 	return deletedResources, nil
 }
 func (g *kubeClientAdapter) newProgressTracker() (*progress.Tracker, error) {
@@ -229,10 +236,15 @@ func (g *kubeClientAdapter) newProgressTracker() (*progress.Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
+	dynClient, err := g.kubeClient.GetDynClient()
+	if err != nil {
+		return nil, err
+	}
+
 	return progress.NewProgressTracker(clientSet, g.logger, progress.Config{
 		Interval: g.config.ProgressInterval,
 		Timeout:  g.config.ProgressTimeout,
-	})
+	}, dynClient)
 }
 
 func (g *kubeClientAdapter) Clientset() (kubernetes.Interface, error) {

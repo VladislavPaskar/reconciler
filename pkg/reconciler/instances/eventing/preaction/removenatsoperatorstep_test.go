@@ -78,7 +78,7 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 
 		scheme, err := getScheme()
 		require.NoError(t, err)
-		dynamicClient := fakeDynamic.NewSimpleDynamicClient(scheme, natsDeployment)
+		dynamicClient := fakeDynamic.NewSimpleDynamicClient(scheme, result...)
 		fakeDiscovery := fakediscovery.FakeDiscovery{
 			Fake:               &dynamicClient.Fake,
 			FakedServerVersion: &k8sversion.Info{},
