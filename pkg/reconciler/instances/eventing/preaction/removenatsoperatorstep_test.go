@@ -6,10 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	clientgotesting "k8s.io/client-go/testing"
-
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
+	k8sversion "k8s.io/apimachinery/pkg/version"
 
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/chart"
 	pmock "github.com/kyma-incubator/reconciler/pkg/reconciler/chart/mocks"
@@ -80,18 +78,22 @@ func TestDeletingNatsOperatorResources(t *testing.T) {
 
 		scheme, err := getScheme()
 		require.NoError(t, err)
-		var codecs = serializer.NewCodecFactory(scheme)
 		dynamicClient := fakeDynamic.NewSimpleDynamicClient(scheme, natsDeployment)
-		o := clientgotesting.NewObjectTracker(scheme, codecs.UniversalDecoder())
-		for _, obj := range result {
-			if err := o.Add(obj); err != nil {
-				panic(err)
-			}
-		}
-		dynamicClient.
-		//fakeDiscovery := &fakediscovery.FakeDiscovery{Fake: &dynamicClient.Fake}
 		fakeDiscovery := fakediscovery.FakeDiscovery{
-			Fake: &dynamicClient.Fake,
+			Fake:               &dynamicClient.Fake,
+			FakedServerVersion: &k8sversion.Info{},
+		}
+		fakeDiscovery.Resources = []*metav1.APIResourceList{
+			{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Deployment",
+					APIVersion: "apps/v1",
+				},
+				GroupVersion: "apps/v1",
+				APIResources: []metav1.APIResource{
+					{Name: "deployments", Namespaced: true, Kind: "Deployment", Group: "apps", Version: "v1"},
+				},
+			},
 		}
 		fakeCached := FakeCached{
 			&fakeDiscovery,
