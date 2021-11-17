@@ -55,6 +55,14 @@ func NewKubeClient(kubeconfig string, logger *zap.SugaredLogger) (*KubeClient, e
 	return newForConfig(config)
 }
 
+func NewFakeKubeClient(dynamicClient dynamic.Interface, config *rest.Config, mapper *restmapper.DeferredDiscoveryRESTMapper) (*KubeClient, error) {
+	return &KubeClient{
+		dynamicClient: dynamicClient,
+		config:        config,
+		mapper:        mapper,
+	}, nil
+}
+
 func NewInClusterClient(logger *zap.SugaredLogger) (*KubeClient, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {

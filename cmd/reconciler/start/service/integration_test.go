@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/runtime"
+	fakeDynamic "k8s.io/client-go/dynamic/fake"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -339,9 +341,12 @@ func expectFailingReconciliation(t *testing.T, callbacks []*reconciler.CallbackM
 }
 
 func newProgressTracker(t *testing.T, clientSet clientgo.Interface) *progress.Tracker {
+	// mock the dynamicClient
+	scheme := runtime.NewScheme()
+	dynamicClient := fakeDynamic.NewSimpleDynamicClient(scheme)
 	prog, err := progress.NewProgressTracker(clientSet, logger.NewLogger(true), progress.Config{
 		Interval: 1 * time.Second,
-	})
+	}, dynamicClient)
 	require.NoError(t, err)
 	return prog
 }

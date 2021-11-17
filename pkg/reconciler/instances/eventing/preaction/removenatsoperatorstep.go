@@ -2,14 +2,14 @@ package preaction
 
 import (
 	"strings"
+	"time"
 
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/chart"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/instances/eventing/log"
-	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes/kubeclient"
+	"github.com/kyma-incubator/reconciler/pkg/reconciler/kubernetes"
 	"github.com/kyma-incubator/reconciler/pkg/reconciler/service"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -26,7 +26,7 @@ var (
 	natsOperatorCRDsToDelete = []string{"natsclusters.nats.io", "natsserviceroles.nats.io"}
 )
 
-type kubeClientProvider func(context *service.ActionContext, logger *zap.SugaredLogger) (*kubeclient.KubeClient, error)
+type kubeClientProvider func(context *service.ActionContext, logger *zap.SugaredLogger) (kubernetes.Client, error)
 
 type removeNatsOperatorStep struct {
 	kubeClientProvider
@@ -38,8 +38,11 @@ func newRemoveNatsOperatorStep() *removeNatsOperatorStep {
 	}
 }
 
-func defaultKubeClientProvider(context *service.ActionContext, logger *zap.SugaredLogger) (*kubeclient.KubeClient, error) {
-	kubeClient, err := kubeclient.NewKubeClient(context.Task.Kubeconfig, logger)
+func defaultKubeClientProvider(context *service.ActionContext, logger *zap.SugaredLogger) (kubernetes.Client, error) {
+	kubeClient, err := kubernetes.NewKubernetesClient(context.Task.Kubeconfig, logger, &kubernetes.Config{
+		ProgressInterval: 5 * time.Second,
+		ProgressTimeout:  5 * time.Minute,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +67,7 @@ func (r *removeNatsOperatorStep) Execute(context *service.ActionContext, logger 
 	return err
 }
 
-func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient *kubeclient.KubeClient, logger *zap.SugaredLogger) error {
+func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.ActionContext, kubeClient kubernetes.Client, logger *zap.SugaredLogger) error {
 	// get charts from the version 1.24.x, where the NATS-operator resources still exist
 	comp := chart.NewComponentBuilder(natsOperatorLastVersion, natsSubChartPath).
 		WithConfiguration(map[string]interface{}{ //todo add more logging
@@ -82,14 +85,14 @@ func (r *removeNatsOperatorStep) removeNatsOperatorResources(context *service.Ac
 	manifest.Manifest = strings.ReplaceAll(manifest.Manifest, natsSubChartPath, eventingNats)
 
 	// remove all the existing nats-operator resources, installed via charts
-	_, err = context.KubeClient.Delete(context.Context, manifest.Manifest, namespace)
+	_, err = kubeClient.Delete(context.Context, manifest.Manifest, namespace)
 	return err
 }
 
 // delete the leftover CRDs, which were outside of charts
-func (r *removeNatsOperatorStep) removeNatsOperatorCRDs(kubeClient *kubeclient.KubeClient, log *zap.SugaredLogger) error {
+func (r *removeNatsOperatorStep) removeNatsOperatorCRDs(kubeClient kubernetes.Client, log *zap.SugaredLogger) error {
 	for _, crdName := range natsOperatorCRDsToDelete {
-		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace, metav1.DeleteOptions{})
+		_, err := kubeClient.DeleteResourceByKindAndNameAndNamespace("customresourcedefinitions", crdName, namespace)
 		if err != nil && !errors.IsNotFound(err) {
 			log.Errorf("Failed to delete the nats-operator CRDs, name='%s', namespace='%s': %s", crdName, namespace, err)
 			return err

@@ -39,6 +39,7 @@ type ResourceInterceptor interface {
 type Client interface {
 	Kubeconfig() string
 	Deploy(ctx context.Context, manifest, namespace string, interceptors ...ResourceInterceptor) ([]*Resource, error)
+	DeleteResourceByKindAndNameAndNamespace(kind, name, namespace string) (*Resource, error)
 	Delete(ctx context.Context, manifest, namespace string) ([]*Resource, error)
 	PatchUsingStrategy(kind, name, namespace string, p []byte, strategy types.PatchType) error
 	Clientset() (kubernetes.Interface, error)

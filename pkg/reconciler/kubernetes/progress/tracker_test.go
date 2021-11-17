@@ -3,6 +3,9 @@ package progress
 import (
 	"context"
 	"io/ioutil"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
+	fakeDynamic "k8s.io/client-go/dynamic/fake"
 	"strings"
 
 	e "github.com/kyma-incubator/reconciler/pkg/error"
@@ -60,12 +63,14 @@ func TestProgressTracker(t *testing.T) {
 		t.Logf("Deployed test resource '%s", deployedResource)
 	}
 
+	// mock the dynamicClient
+	dynamicClient := createDynamicClient()
 	t.Run("Test progress tracking with timeout", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second) //stop progress tracker after 1 sec
 		defer cancel()
 
 		pt, err := NewProgressTracker(clientSet, logger,
-			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute})
+			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute}, dynamicClient)
 		require.NoError(t, err)
 
 		addWatchable(t, resources, pt)
@@ -83,7 +88,7 @@ func TestProgressTracker(t *testing.T) {
 	t.Run("Test progress tracking to state 'ready'", func(t *testing.T) {
 		// get progress tracker
 		pt, err := NewProgressTracker(clientSet, logger,
-			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute})
+			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute}, dynamicClient)
 		require.NoError(t, err)
 
 		addWatchable(t, resources, pt)
@@ -102,7 +107,7 @@ func TestProgressTracker(t *testing.T) {
 
 		//ensure progress returns error when checking for ready state of terminating resources
 		pt1, err := NewProgressTracker(clientSet, logger,
-			Config{Interval: 1 * time.Second, Timeout: 2 * time.Second})
+			Config{Interval: 1 * time.Second, Timeout: 2 * time.Second}, dynamicClient)
 		require.NoError(t, err)
 		addWatchable(t, resources, pt1)
 		require.Error(t, pt1.Watch(ctx, ReadyState)) //error expected as resources could not be watched
@@ -110,7 +115,7 @@ func TestProgressTracker(t *testing.T) {
 
 		//ensure pgoress returns no error when checking for terminated resources
 		pt2, err := NewProgressTracker(clientSet, logger,
-			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute})
+			Config{Interval: 1 * time.Second, Timeout: 1 * time.Minute}, dynamicClient)
 		require.NoError(t, err)
 		addWatchable(t, resources, pt2)
 
@@ -125,6 +130,9 @@ func TestDaemonSetRollingUpdate(t *testing.T) {
 
 	kubeClient, err := internal.NewKubeClient(test.ReadKubeconfig(t), zap.NewNop().Sugar())
 	require.NoError(t, err)
+
+	// mock the dynamicClient
+	dynamicClient := createDynamicClient()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -151,7 +159,7 @@ func TestDaemonSetRollingUpdate(t *testing.T) {
 	time.Sleep(time.Second)
 
 	logger := log.NewLogger(true)
-	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(DaemonSet, ds.GetNamespace(), ds.GetName())
@@ -165,7 +173,7 @@ func TestDaemonSetRollingUpdate(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(time.Second)
 
-	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(DaemonSet, ds.GetNamespace(), ds.GetName())
@@ -178,6 +186,9 @@ func TestStatefulSetRollingUpdate(t *testing.T) {
 
 	kubeClient, err := internal.NewKubeClient(test.ReadKubeconfig(t), zap.NewNop().Sugar())
 	require.NoError(t, err)
+
+	// mock the dynamicClient
+	dynamicClient := createDynamicClient()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -204,7 +215,7 @@ func TestStatefulSetRollingUpdate(t *testing.T) {
 	time.Sleep(time.Second)
 
 	logger := log.NewLogger(true)
-	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(StatefulSet, ss.GetNamespace(), ss.GetName())
@@ -218,7 +229,7 @@ func TestStatefulSetRollingUpdate(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(time.Second)
 
-	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(StatefulSet, ss.GetNamespace(), ss.GetName())
@@ -231,6 +242,9 @@ func TestDeploymentRollingUpdate(t *testing.T) {
 
 	kubeClient, err := internal.NewKubeClient(test.ReadKubeconfig(t), zap.NewNop().Sugar())
 	require.NoError(t, err)
+
+	// mock the dynamicClient
+	dynamicClient := createDynamicClient()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
@@ -257,7 +271,7 @@ func TestDeploymentRollingUpdate(t *testing.T) {
 	time.Sleep(time.Second)
 
 	logger := log.NewLogger(true)
-	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err := NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(Deployment, dep.GetNamespace(), dep.GetName())
@@ -271,7 +285,7 @@ func TestDeploymentRollingUpdate(t *testing.T) {
 	require.NoError(t, err)
 	time.Sleep(time.Second)
 
-	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute})
+	tracker, err = NewProgressTracker(clientSet, logger, Config{Interval: 1 * time.Second, Timeout: 3 * time.Minute}, dynamicClient)
 	require.NoError(t, err)
 
 	tracker.AddResource(Deployment, dep.GetNamespace(), dep.GetName())
@@ -311,4 +325,9 @@ func readManifest(t *testing.T, filename string) []*unstructured.Unstructured {
 	}
 
 	return result
+}
+
+func createDynamicClient() dynamic.Interface {
+	scheme := runtime.NewScheme()
+	return fakeDynamic.NewSimpleDynamicClient(scheme)
 }

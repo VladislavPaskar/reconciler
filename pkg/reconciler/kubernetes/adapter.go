@@ -3,8 +3,11 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"time"
 
+	"k8s.io/client-go/dynamic"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -35,6 +38,10 @@ type kubeClientAdapter struct {
 	kubeClient *internal.KubeClient
 	logger     *zap.SugaredLogger
 	config     *Config
+}
+
+func (g *kubeClientAdapter) GetDynClient() (dynamic.Interface, error) {
+	return g.kubeClient.GetDynClient()
 }
 
 type Config struct {
@@ -77,6 +84,22 @@ func adapt(impl *internal.KubeClient, kubeconfig string, logger *zap.SugaredLogg
 		logger:     logger,
 		config:     config,
 	}
+}
+
+// todo comment
+func NewFakeKubernetesClient(dynClient dynamic.Interface, logger *zap.SugaredLogger, restConfig *rest.Config, mapper *restmapper.DeferredDiscoveryRESTMapper, config *Config) (*kubeClientAdapter, error) {
+
+	kubeClient, err := internal.NewFakeKubeClient(dynClient, restConfig, mapper)
+	if err != nil {
+		return nil, err
+	}
+
+	return &kubeClientAdapter{
+		kubeconfig: "",
+		kubeClient: kubeClient,
+		logger:     logger,
+		config:     config,
+	}, nil
 }
 
 func (g *kubeClientAdapter) Kubeconfig() string {
@@ -213,6 +236,18 @@ func (g *kubeClientAdapter) newNamespaceUnstruct(namespace string) (*unstructure
 	return nsUnstructs[0], nil
 }
 
+func (g *kubeClientAdapter) DeleteResourceByKindAndNameAndNamespace(kind, name, namespace string) (*Resource, error) {
+	metadata, err := g.kubeClient.DeleteResourceByKindAndNameAndNamespace(
+		kind, name, namespace, metav1.DeleteOptions{})
+	deletedResource := toResource(metadata)
+	if err != nil && !k8serr.IsNotFound(err) {
+		g.logger.Errorf("Failed to delete Kubernetes unstructured resource kind='%s', name='%s', namespace='%s': %s",
+			kind, name, namespace, err)
+		return deletedResource, err
+	}
+	return deletedResource, nil
+}
+
 func (g *kubeClientAdapter) Delete(ctx context.Context, manifest, namespace string) ([]*Resource, error) {
 	if namespace == "" {
 		namespace = defaultNamespace
@@ -234,6 +269,12 @@ func (g *kubeClientAdapter) Delete(ctx context.Context, manifest, namespace stri
 	var deletedResources []*Resource
 	for i := len(unstructs) - 1; i >= 0; i-- {
 		unstruct := unstructs[i]
+
+		// do not execute the delete request only if the resource doesn't exist
+		_, err := g.kubeClient.Get(unstruct.GetKind(), unstruct.GetName(), namespace)
+		if k8serr.IsNotFound(err) {
+			continue
+		}
 
 		g.logger.Debugf("Deleting resource kind='%s', name='%s', namespace='%s'",
 			unstruct.GetKind(), unstruct.GetName(), unstruct.GetNamespace())
@@ -275,10 +316,15 @@ func (g *kubeClientAdapter) newProgressTracker() (*progress.Tracker, error) {
 	if err != nil {
 		return nil, err
 	}
+	dynClient, err := g.kubeClient.GetDynClient()
+	if err != nil {
+		return nil, err
+	}
+
 	return progress.NewProgressTracker(clientSet, g.logger, progress.Config{
 		Interval: g.config.ProgressInterval,
 		Timeout:  g.config.ProgressTimeout,
-	})
+	}, dynClient)
 }
 
 func (g *kubeClientAdapter) Clientset() (kubernetes.Interface, error) {
